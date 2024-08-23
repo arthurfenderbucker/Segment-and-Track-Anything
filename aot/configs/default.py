@@ -112,7 +112,8 @@ class DefaultEngineConfig():
         self.DIR_YTB = os.path.join(self.DIR_DATA, 'YTB')
         self.DIR_STATIC = os.path.join(self.DIR_DATA, 'Static')
 
-        self.DIR_ROOT = './'#'./data_wd/youtube_vos_jobs'
+        self.DIR_ROOT = './' if 'AOT_ROOT' in os.environ.keys() and os.environ['AOT_ROOT'] == '' else os.environ['AOT_ROOT']
+        #'./data_wd/youtube_vos_jobs'
 
         self.DIR_RESULT = os.path.join(self.DIR_ROOT, 'result', self.EXP_NAME,
                                        self.STAGE_NAME)
@@ -122,8 +123,8 @@ class DefaultEngineConfig():
         self.DIR_TB_LOG = os.path.join(self.DIR_RESULT, 'log', 'tensorboard')
         # self.DIR_IMG_LOG = os.path.join(self.DIR_RESULT, 'log', 'img')
         # self.DIR_EVALUATION = os.path.join(self.DIR_RESULT, 'eval')
-        self.DIR_IMG_LOG = './img_logs'
-        self.DIR_EVALUATION = './results'
+        self.DIR_IMG_LOG = os.path.join(self.DIR_ROOT,'img_logs')
+        self.DIR_EVALUATION = os.path.join(self.DIR_ROOT,'results')
 
         for path in [
                 self.DIR_RESULT, self.DIR_CKPT, self.DIR_EMA_CKPT,

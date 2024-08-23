@@ -1,6 +1,17 @@
 import sys
-sys.path.append("..")
-sys.path.append("./sam")
+import os
+this_py_file = os.path.realpath(__file__)
+file_dir = os.path.dirname(this_py_file)
+
+if file_dir not in sys.path:
+    sys.path.append(file_dir)
+if os.path.join(file_dir,'..') not in sys.path:
+    sys.path.append(os.path.join(file_dir,'..'))
+if os.path.join(file_dir,'sam') not in sys.path:
+    sys.path.append(os.path.join(file_dir,'sam'))
+if os.path.join(file_dir,'src') not in sys.path:
+    sys.path.append(os.path.join(file_dir,'src/groundingdino'))
+
 from sam.segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 from aot_tracker import get_aot
 import numpy as np
@@ -12,13 +23,16 @@ from seg_track_anything import draw_mask
 
 
 class SegTracker():
-    def __init__(self,segtracker_args, sam_args, aot_args) -> None:
+    def __init__(self,segtracker_args, sam_args, aot_args, gd_args=None) -> None:
         """
          Initialize SAM and AOT.
         """
         self.sam = Segmentor(sam_args)
         self.tracker = get_aot(aot_args)
-        self.detector = Detector(self.sam.device)
+        if gd_args is not None:
+            self.detector = Detector(self.sam.device, config_file=gd_args['config_file'], ckpt_file=gd_args['ckpt_file'])
+        else:
+            self.detector = Detector(self.sam.device)
         self.sam_gap = segtracker_args['sam_gap']
         self.min_area = segtracker_args['min_area']
         self.max_obj_num = segtracker_args['max_obj_num']
@@ -139,14 +153,67 @@ class SegTracker():
             obj_area = np.sum(seg_mask==idx)
             if new_obj_area/obj_area < self.min_new_obj_iou or new_obj_area < self.min_area\
                 or obj_num > self.max_obj_num:
+                # print(f"new_obj_area/obj_area: {new_obj_area/obj_area}, new_obj_area: {new_obj_area}, obj_area: {obj_area}")
                 new_obj_mask[new_obj_mask==idx] = 0
             else:
                 new_obj_mask[new_obj_mask==idx] = obj_num
                 obj_num += 1
         return new_obj_mask
+
+    def find_new_objs_with_logits(self, track_mask, seg_mask, track_mask_logits=None, seg_mask_logits=None):
+        '''
+        Compare tracked results from AOT with segmented results from SAM. Select objects from background if they are not tracked.
+        Arguments:
+            track_mask: numpy array (h,w)
+            seg_mask: numpy array (h,w)
+            track_mask_logits: dict({obj_id: logits})
+            seg_mask_logits: dict({obj_id: logits})
+        Return:
+            new_obj_mask: numpy array (h,w)
+        '''
+        # if track_mask_logits is not None and seg_mask_logits is not None:
+        #     # consider the idices of the trackmask that have lower logits than the segmask as background
+
+        #     # get list idx of from track_mask that have lower logits than each seg_mask
+        #     new_obj_mask = np.zeros_like(track_mask)
+
+            
+        #     for seg_idx, logit in seg_mask_logits.items():
+        #         for idx, logit in track_mask_logits.items():
+        #             if idx in seg_mask_logits:
+        #                 if logit < seg_mask_logits[idx]:
+        #                     new_obj_mask[track_mask==idx] = idx
+
+        # else:
+        new_obj_mask = (track_mask==0) * seg_mask
+        new_obj_ids = np.unique(new_obj_mask)
+        new_obj_ids = new_obj_ids[new_obj_ids!=0]
+        # obj_num = self.get_obj_num() + 1
+        obj_num = self.curr_idx
+        new_ids_to_seg_ids = {}
+        for idx in new_obj_ids:
+            new_obj_area = np.sum(new_obj_mask==idx)
+            obj_area = np.sum(seg_mask==idx)
+            if new_obj_area/obj_area < self.min_new_obj_iou or new_obj_area < self.min_area\
+                or obj_num > self.max_obj_num:
+                # print(f"new_obj_area/obj_area: {new_obj_area/obj_area}, new_obj_area: {new_obj_area}, obj_area: {obj_area}")
+                new_obj_mask[new_obj_mask==idx] = 0
+            else:
+                new_obj_mask[new_obj_mask==idx] = obj_num
+                obj_num += 1
+                new_ids_to_seg_ids[obj_num] = idx
+        return new_obj_mask, new_ids_to_seg_ids
         
     def restart_tracker(self):
         self.tracker.restart()
+
+    def reset(self):
+        self.reference_objs_list = []
+        self.object_idx = 1
+        self.curr_idx = 1
+        self.origin_merged_mask = None  # init by segment-everything or update
+        self.first_frame_mask = None
+        self.restart_tracker()
 
     def seg_acc_bbox(self, origin_frame: np.ndarray, bbox: np.ndarray,):
         ''''
@@ -227,6 +294,7 @@ class SegTracker():
         bc_id = self.curr_idx
         bc_mask = self.origin_merged_mask
 
+        refined_merged_mask = np.zeros_like(origin_frame[:,:,0])
         # get annotated_frame and boxes
         annotated_frame, boxes = self.detector.run_grounding(origin_frame, grounding_caption, box_threshold, text_threshold)
         for i in range(len(boxes)):
@@ -242,6 +310,45 @@ class SegTracker():
         self.reset_origin_merged_mask(bc_mask, bc_id)
 
         return refined_merged_mask, annotated_frame
+    
+    def detect_and_seg_with_info(self, origin_frame: np.ndarray, grounding_caption, box_threshold, text_threshold, box_size_threshold=1, reset_image=False):
+        '''
+        Using Grounding-DINO to detect object acc Text-prompts
+        Retrun:
+            refined_merged_mask: numpy array (h, w)
+            annotated_frame: numpy array (h, w, 3)
+            boxes: array [[x0, y0], [x1, y1]]
+        '''
+        # backup id and origin-merged-mask
+        bc_id = self.curr_idx
+        bc_mask = self.origin_merged_mask
+
+        refined_merged_mask = np.zeros_like(origin_frame[:,:,0])
+        # get annotated_frame and boxes
+        annotated_frame, boxes, info = self.detector.run_grounding_with_info(origin_frame, grounding_caption, box_threshold, text_threshold)
+        bb = []
+        logits = []
+        phrases = []
+        for i in range(len(boxes)):
+            bbox = boxes[i]
+            if (bbox[1][0] - bbox[0][0]) * (bbox[1][1] - bbox[0][1]) > annotated_frame.shape[0] * annotated_frame.shape[1] * box_size_threshold:
+                continue
+            if info['logits'][i] < text_threshold:
+                continue
+            bb.append(bbox)
+            logits.append(float(info['logits'][i]))
+            phrases.append(info['phrases'][i])
+
+            interactive_mask = self.sam.segment_with_box(origin_frame, bbox, reset_image)[0]
+            refined_merged_mask = self.add_mask(interactive_mask)
+            self.update_origin_merged_mask(refined_merged_mask)
+            self.curr_idx += 1
+
+        info = {"logits": logits, "phrases": phrases, "bboxes": bb}
+        # reset origin_mask
+        self.reset_origin_merged_mask(bc_mask, bc_id)
+
+        return refined_merged_mask, annotated_frame, info
 
 if __name__ == '__main__':
     from model_args import segtracker_args,sam_args,aot_args

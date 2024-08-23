@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import cv2
 import PIL
+import os 
 
 from groundingdino.models import build_model as build_grounding_dino
 from groundingdino.util.slconfig import SLConfig
@@ -12,9 +13,19 @@ import groundingdino.datasets.transforms as T
 from torchvision.ops import box_convert
 
 class Detector:
-    def __init__(self, device):
-        config_file = "src/groundingdino/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-        grounding_dino_ckpt = './ckpt/groundingdino_swint_ogc.pth'
+    def __init__(self, device, config_file=None, ckpt_file=None):
+        
+        this_file_dir = os.path.dirname(os.path.realpath(__file__))
+        
+        # config_file = os.path.join(this_file_dir, "../src/groundingdino/groundingdino/config/GroundingDINO_SwinT_OGC.py")
+        # grounding_dino_ckpt = os.path.join(this_file_dir,'../ckpt/groundingdino_swint_ogc.pth')
+        if config_file is None:
+            config_file = os.path.join(this_file_dir, "../src/groundingdino/groundingdino/config/GroundingDINO_SwinB_cfg.py")
+        if ckpt_file is None:
+            grounding_dino_ckpt = os.path.join(this_file_dir,'../ckpt/groundingdino_swinb_cogcoor.pth')
+        else:
+            grounding_dino_ckpt = ckpt_file
+            
         args = SLConfig.fromfile(config_file) 
         args.device = device
         self.deivce = device
@@ -66,7 +77,6 @@ class Detector:
         re_width, re_height = img_pil.size
         _, image_tensor = self.image_transform_grounding(img_pil)
         # img_pil = self.image_transform_grounding_for_vis(img_pil)
-
         # run grounidng
         boxes, logits, phrases = predict(self.gd, image_tensor, grounding_caption, box_threshold, text_threshold, device=self.deivce)
         annotated_frame = annotate(image_source=np.asarray(img_pil), boxes=boxes, logits=logits, phrases=phrases)[:, :, ::-1]
@@ -75,6 +85,29 @@ class Detector:
         # transfer boxes to sam-format 
         transfered_boxes = self.transfer_boxes_format(boxes, re_height, re_width)
         return annotated_frame, transfered_boxes
+    
+    @torch.no_grad()
+    def run_grounding_with_info(self, origin_frame, grounding_caption, box_threshold, text_threshold):
+        '''
+            return:
+                annotated_frame:nd.array
+                transfered_boxes: nd.array [N, 4]: [[x0, y0], [x1, y1]]
+                info: dict {"logits": logits, "phrases": phrases}
+        '''
+        height, width, _ = origin_frame.shape
+        img_pil = PIL.Image.fromarray(origin_frame)
+        re_width, re_height = img_pil.size
+        _, image_tensor = self.image_transform_grounding(img_pil)
+        # img_pil = self.image_transform_grounding_for_vis(img_pil)
+        # run grounidng
+        boxes, logits, phrases = predict(self.gd, image_tensor, grounding_caption, box_threshold, text_threshold, device=self.deivce)
+        annotated_frame = annotate(image_source=np.asarray(img_pil), boxes=boxes, logits=logits, phrases=phrases)[:, :, ::-1]
+        annotated_frame = cv2.resize(annotated_frame, (width, height), interpolation=cv2.INTER_LINEAR)
+        
+        # transfer boxes to sam-format 
+        transfered_boxes = self.transfer_boxes_format(boxes, re_height, re_width)
+        info = {"logits": logits, "phrases": phrases}
+        return annotated_frame, transfered_boxes, info
 
 if __name__ == "__main__":
     detector = Detector("cuda")

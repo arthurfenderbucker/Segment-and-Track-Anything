@@ -3,7 +3,7 @@ cd sam; pip install -e .
 cd -
 
 # Install Grounding-Dino
-pip install -e git+https://github.com/IDEA-Research/GroundingDINO.git@main#egg=GroundingDINO
+pip install -e git+https://github.com/IDEA-Research/GroundingDINO.git@main#egg=GroundingDINO --no-cache-dir
 
 # Install other lib
 pip install numpy opencv-python pycocotools matplotlib Pillow==9.2.0 scikit-image

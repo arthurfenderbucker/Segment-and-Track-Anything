@@ -3,7 +3,16 @@ import torch
 import torch.nn.functional as F
 import os
 import sys
-sys.path.append("./aot")
+
+this_py_file = os.path.realpath(__file__)
+file_dir = os.path.dirname(this_py_file)
+
+if file_dir not in sys.path:
+    sys.path.append(file_dir)
+if os.path.join(file_dir,'aot') not in sys.path:
+    sys.path.append(os.path.join(file_dir,'aot'))
+# sys.path.append("./aot")
+
 from aot.networks.engines.aot_engine import AOTEngine,AOTInferEngine
 from aot.networks.engines.deaot_engine import DeAOTEngine,DeAOTInferEngine
 import importlib
