@@ -8,9 +8,12 @@ this_py_file = os.path.realpath(__file__)
 file_dir = os.path.dirname(this_py_file)
 
 if file_dir not in sys.path:
-    sys.path.append(file_dir)
+    # sys.path.append(file_dir)
+    sys.path.insert(0,file_dir) 
 if os.path.join(file_dir,'aot') not in sys.path:
-    sys.path.append(os.path.join(file_dir,'aot'))
+    # sys.path.append(os.path.join(file_dir,'aot'))
+    sys.path.insert(0,os.path.join(file_dir,'aot'))
+
 # sys.path.append("./aot")
 
 from aot.networks.engines.aot_engine import AOTEngine,AOTInferEngine
