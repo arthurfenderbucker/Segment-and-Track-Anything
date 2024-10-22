@@ -12,7 +12,6 @@ if os.path.join(file_dir,'sam') not in sys.path:
 if os.path.join(file_dir,'src') not in sys.path:
     sys.path.append(os.path.join(file_dir,'src/groundingdino'))
 
-from sam.segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 from aot_tracker import get_aot
 import numpy as np
 from tool.segmentor import Segmentor
